@@ -155,6 +155,7 @@ extract_host_package() {
   cid="$($SUDO docker create "${IMAGES[0]}")"
   $SUDO docker cp "$cid:/app/host/." "$INSTALL_DIR/"
   $SUDO docker rm "$cid" >/dev/null
+  mkdir -p "$INSTALL_DIR/web"  # o compose cita ./web no build (só usado em dev); sem compilar, basta existir
   $SUDO chown -R "$USER:" "$INSTALL_DIR"
 }
 
@@ -169,13 +170,23 @@ setup_host() {
 }
 
 run_bootstrap() {
+  # As imagens oficiais exigem licença: sem ela a stack nova não controlaria os
+  # carregadores. Para antes de trocar a stack — a que está rodando continua.
+  if ! $SUDO test -s /etc/ionsmart/license/license.json; then
+    err "A placa ficou sem licença (veja o aviso do setup-host.sh acima). Nada foi trocado na stack em execução."
+    err "Corrija (token válido, nuvem com EDGE_LICENSE_PRIVATE_KEY) e rode o instalador de novo."
+    exit 1
+  fi
   # setup-host.sh pode ter movido o Docker para o NVMe: as imagens ficaram para trás
   $SUDO docker image inspect "${IMAGES[@]}" >/dev/null 2>&1 || pull_images
   step "Subindo a plataforma (bootstrap-edge-rpi.sh)"
   IONSMART_IMAGE_TAG="$VERSION" INSTALL_DIR="$INSTALL_DIR" SYNC_CLOUD_URL="$CLOUD_URL" bash "$INSTALL_DIR/scripts/bootstrap-edge-rpi.sh"
+  # Imagens compiladas no Pi pela instalação antiga e o cache do build guardam o
+  # código-fonte: só ficam as imagens em uso pela stack que acabou de subir
+  $SUDO docker builder prune -af >/dev/null 2>&1 || true
+  $SUDO docker image prune -af >/dev/null 2>&1 || true
   if [ -d "$OLD_DIR" ]; then
     rm -rf "$OLD_DIR"
-    $SUDO docker image prune -f >/dev/null 2>&1 || true  # imagens compiladas no Pi pela instalação antiga
     log "Código antigo apagado"
   fi
 }
