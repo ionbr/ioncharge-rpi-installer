@@ -13,23 +13,22 @@ curl -fsSL https://raw.githubusercontent.com/ionbr/ioncharge-rpi-installer/ion-s
 ```
 
 O script:
-1. instala os pacotes base;
-2. gera a **chave de leitura do Pi** e espera um admin Ion cadastrá-la no repositório;
-3. clona o [ionbr/ion-smart-charge](https://github.com/ionbr/ion-smart-charge) (branch `ion-smart-edge`);
-4. roda `infra/pi/setup-host.sh`: hostname `ionsmart-xxxx`, certificado HTTPS, watchdog, firewall, rede (DHCP + IP de serviço 192.168.250.1) e hotspot de configuração;
-5. roda `scripts/bootstrap-edge-rpi.sh`: Docker, `.env`, build das imagens e stack (Postgres, Mosquitto, backend, painel e nginx);
-6. pede para reiniciar.
+1. instala os pacotes base e o Docker;
+2. pede o **token de preparação** (e a chave do Tailscale, opcional);
+3. baixa as imagens prontas da versão. A credencial de leitura vem da Smart Cloud pelo token e é descartada no fim;
+4. extrai de dentro da imagem o pacote do host (`setup-host.sh`, compose, configs);
+5. roda `infra/pi/setup-host.sh`: hostname `ionsmart-xxxx`, serial, **licença da placa**, certificado HTTPS, watchdog, firewall, rede (DHCP + IP de serviço 192.168.250.1) e hotspot de configuração;
+6. roda `scripts/bootstrap-edge-rpi.sh`: `.env` e stack (Postgres, Mosquitto, backend, painel e nginx), sem compilar nada;
+7. pede para reiniciar.
 
-Tempo: ~15–25 min na primeira vez (o build das imagens no Pi é o gargalo).
-
-Nenhuma conta ou token pessoal do GitHub fica no Pi. Pis instalados pelo instalador antigo têm o login do `gh` removido.
+O Pi **não recebe código-fonte nem chave do GitHub**. Um Pi instalado pelo instalador antigo (com clone do repositório) é convertido ao rodar este instalador: o código e a deploy key são apagados; `.env`, senha do Mosquitto e banco ficam. Depois, um admin Ion apaga a deploy key `rpi-<hostname>` no GitHub.
 
 ## O que o técnico faz
 
 1. Liga o Pi no cabo de rede e abre o terminal.
 2. Roda o `curl | bash` acima.
-3. **Pede a um admin Ion para cadastrar a chave** mostrada na tela em `https://github.com/ionbr/ion-smart-charge/settings/keys/new` (título `rpi-<hostname>`, **sem** "Allow write access"). O script continua sozinho quando a chave é cadastrada.
-4. Espera o build e responde **S** para reiniciar.
+3. Digita o **token de preparação**, gerado por um admin Ion na Frota (Dispositivos → Gerar token de preparação). O token vale 24 h e serve para vários Pis.
+4. Responde **S** para reiniciar.
 
 ## Depois do reinício
 
@@ -52,8 +51,9 @@ O certificado é autoassinado: o navegador pede confirmação na primeira vez. A
 
 | Variável | Default | Descrição |
 |---|---|---|
-| `INSTALL_DIR` | `$HOME/ion-smart-charge` | Destino do clone |
-| `BRANCH` | `ion-smart-edge` | Branch do repo privado |
+| `IONSMART_VERSION` | `ion-smart-edge` | Versão das imagens (`1.0.0-rc.1`, …) |
+| `IONSMART_PROVISION_TOKEN` | (pergunta) | Token de preparação |
+| `INSTALL_DIR` | `$HOME/ion-smart-charge` | Pasta da instalação (não troque num Pi já instalado: o nome define o volume do banco) |
 | `HOSTNAME_NEW` | `ionsmart-<MAC>` | Hostname do Pi |
 | `SYNC_CLOUD_URL` | `https://smart.ioncharge.com.br` | URL da Smart Cloud |
 | `EDGE_RETENTION_DAYS` | `30` | Dias de retenção local |
@@ -62,10 +62,10 @@ Segredos (`JWT_SECRET`, `POSTGRES_PASSWORD`, `MOSQUITTO_PASSWORD`…) são gerad
 
 ## Atualizar um Pi já instalado
 
-Até existir a atualização OTA, rode o bootstrap de novo (ele puxa o branch, recalcula a versão e remove containers antigos):
+Até existir a atualização OTA (V.7), rode o instalador de novo com a versão desejada (pede um token de preparação):
 
 ```bash
-bash ~/ion-smart-charge/scripts/bootstrap-edge-rpi.sh
+curl -fsSL https://raw.githubusercontent.com/ionbr/ioncharge-rpi-installer/ion-smart-edge/install.sh | IONSMART_VERSION=1.0.0-rc.1 bash
 ```
 
 ## O que este repositório contém

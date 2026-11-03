@@ -2,37 +2,39 @@
 # ============================================================
 # Ion Smart Edge — instalador de um comando para Raspberry Pi 5
 #
-# Uso (técnico em campo, num Pi com internet):
+# Uso (técnico da Ion, num Pi com internet):
 #   curl -fsSL https://raw.githubusercontent.com/ionbr/ioncharge-rpi-installer/ion-smart-edge/install.sh | bash
 #
 # Etapas:
-#   1. apt: git, curl, ca-certificates, openssh-client
-#   2. Chave de leitura do Pi (deploy key) — um admin Ion cadastra no repo
-#   3. Clona o repo privado ionbr/ion-smart-charge por SSH com essa chave
-#   4. sudo infra/pi/setup-host.sh (rede, HTTPS, watchdog, firewall, hotspot)
-#   5. scripts/bootstrap-edge-rpi.sh (Docker, .env, build e stack)
-#   6. Pede o reboot (rede, watchdog e hotspot valem a partir dele)
+#   1. apt: curl, ca-certificates, python3 · Docker (get.docker.com)
+#   2. Pede o token de preparação (Frota → Gerar token) e a chave do Tailscale
+#   3. Baixa as imagens prontas da versão (GHCR privado; a credencial de
+#      leitura vem da Smart Cloud pelo token e não fica no Pi)
+#   4. Extrai o pacote do host de dentro da imagem (setup-host.sh, compose…)
+#   5. sudo infra/pi/setup-host.sh (rede, HTTPS, firewall, hotspot, serial e licença)
+#   6. scripts/bootstrap-edge-rpi.sh (.env e stack, sem build)
+#   7. Pede o reboot
 #
-# Nenhuma conta ou token pessoal do GitHub fica no Pi: só a chave de
-# leitura dele (I.5). Não contém segredos nem código do produto.
+# L.1: o Pi não recebe código-fonte nem chave do GitHub. Um Pi instalado
+# pela versão antiga (clone git) é convertido: o código e a deploy key são
+# apagados; .env, senha do Mosquitto e o banco (volume Docker) ficam.
 #
-# Variáveis (todas opcionais, repassadas para o bootstrap):
-#   INSTALL_DIR    destino do clone (default: $HOME/ion-smart-charge)
-#   BRANCH         branch do repo privado (default: ion-smart-edge)
-#   HOSTNAME_NEW   hostname do Pi (default: ionsmart-<4 últimos do MAC>)
-#   TS_AUTHKEY     chave de uso único do Tailscale da Ion (suporte remoto);
-#                  sem ela o instalador pergunta (Enter pula)
-#   SYNC_CLOUD_URL URL da Smart Cloud
-#   (demais: ver scripts/bootstrap-edge-rpi.sh no repo principal)
+# Variáveis (todas opcionais):
+#   IONSMART_VERSION           tag das imagens (default: ion-smart-edge; versão: 1.0.0-rc.1)
+#   IONSMART_PROVISION_TOKEN   token de preparação (sem ele o instalador pergunta)
+#   TS_AUTHKEY                 chave do Tailscale da Ion (sem ela pergunta; Enter pula)
+#   INSTALL_DIR                default: $HOME/ion-smart-charge (o nome define o volume do banco — não troque num Pi já instalado)
+#   HOSTNAME_NEW               hostname do Pi (default: ionsmart-<4 últimos do MAC>)
+#   SYNC_CLOUD_URL             URL da Smart Cloud (default: https://smart.ioncharge.com.br)
 # ============================================================
 set -euo pipefail
 
-REPO_OWNER="ionbr"
-REPO_NAME="ion-smart-charge"
-BRANCH="${BRANCH:-ion-smart-edge}"
+VERSION="${IONSMART_VERSION:-ion-smart-edge}"
+CLOUD_URL="${SYNC_CLOUD_URL:-https://smart.ioncharge.com.br}"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/ion-smart-charge}"
-SSH_KEY_PATH="${SSH_KEY_PATH:-$HOME/.ssh/id_ion}"   # mesma chave/alias do bootstrap
-REPO_URL_SSH="git@github-ion:${REPO_OWNER}/${REPO_NAME}.git"
+OLD_DIR="${INSTALL_DIR}.antigo-git"
+PREFIX="ghcr.io/ionbr/ion-smart-charge"
+IMAGES=("$PREFIX/backend:$VERSION" "$PREFIX/frontend-edge:$VERSION")
 
 # ---------- cores / logging ----------
 if [ -t 1 ]; then
@@ -75,123 +77,107 @@ detect_os() {
   esac
 }
 
-install_apt_prereqs() {
-  step "Instalando pacotes base (git, curl, ca-certificates, openssh-client)"
+install_prereqs() {
+  step "Instalando pacotes base e Docker"
   $SUDO apt-get update -y
-  $SUDO apt-get install -y git curl ca-certificates openssh-client
+  $SUDO apt-get install -y curl ca-certificates python3
+  if ! need_cmd docker; then curl -fsSL https://get.docker.com | $SUDO sh; fi
+  $SUDO systemctl enable --now docker >/dev/null 2>&1 || true
+  # o grupo docker fica com o bootstrap: ele sabe usar sudo enquanto o grupo não vale
 }
 
-test_repo_access() {
-  GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new" \
-    git ls-remote "$REPO_URL_SSH" HEAD >/dev/null 2>&1
-}
-
-# Nome do Pi como o setup-host.sh vai deixá-lo (ionsmart-<MAC>): a chave
-# é gerada antes da troca de hostname e precisa de um nome único no GitHub.
-pi_name() {
-  if [ -n "${HOSTNAME_NEW:-}" ]; then echo "$HOSTNAME_NEW"; return; fi
-  if [ "$(hostname)" != raspberrypi ]; then hostname; return; fi
-  local suffix
-  suffix="$(tr -d ':\n' < "/sys/class/net/${IONSMART_ETH:-eth0}/address" 2>/dev/null | tail -c 4)"
-  echo "ionsmart-${suffix:-0000}"
-}
-
-# Chave de leitura do Pi. O bootstrap reconhece a mesma chave e o mesmo
-# alias 'github-ion' e não pede de novo.
-setup_deploy_key() {
-  step "Chave de acesso do Pi ao código (somente leitura)"
-  mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh"
-  [ -f "$SSH_KEY_PATH" ] || ssh-keygen -t ed25519 -f "$SSH_KEY_PATH" -N "" -C "ioncharge-rpi-$(pi_name)" -q
-  chmod 600 "$SSH_KEY_PATH"
-
-  touch "$HOME/.ssh/known_hosts" && chmod 600 "$HOME/.ssh/known_hosts"
-  ssh-keygen -F github.com -f "$HOME/.ssh/known_hosts" >/dev/null 2>&1 \
-    || ssh-keyscan -t rsa,ecdsa,ed25519 github.com >> "$HOME/.ssh/known_hosts" 2>/dev/null
-
-  local config="$HOME/.ssh/config"
-  touch "$config" && chmod 600 "$config"
-  if ! grep -q '^Host github-ion$' "$config"; then
-    printf '\n# IonCharge — chave de leitura do repo (install.sh)\nHost github-ion\n  HostName github.com\n  User git\n  IdentityFile %s\n  IdentitiesOnly yes\n' \
-      "$SSH_KEY_PATH" >> "$config"
+ask() { # ask VAR "pergunta" — lê do terminal sem eco (stdin é o pipe do curl)
+  if [ -z "${!1:-}" ] && [ -r /dev/tty ]; then
+    printf "\n  %s " "$2" > /dev/tty
+    read -rs "$1" < /dev/tty || true
+    printf "\n" > /dev/tty
   fi
-
-  if test_repo_access; then
-    log "Chave já cadastrada"
-    return
-  fi
-
-  echo
-  printf "${BOLD}${YELLOW}══════════════════════════════════════════════════════════${NC}\n"
-  printf "${BOLD}${YELLOW}  📋 AÇÃO NECESSÁRIA — um admin Ion cadastra esta chave${NC}\n"
-  printf "${BOLD}${YELLOW}══════════════════════════════════════════════════════════${NC}\n"
-  echo
-  printf "  1. Abra: ${BOLD}https://github.com/${REPO_OWNER}/${REPO_NAME}/settings/keys/new${NC}\n"
-  printf "  2. Title: ${BOLD}rpi-$(pi_name)${NC}\n"
-  printf "  3. Key (linha única):\n\n${GREEN}"
-  cat "${SSH_KEY_PATH}.pub"
-  printf "${NC}\n  4. ${BOLD}Não marque${NC} 'Allow write access' e clique em ${BOLD}Add key${NC}\n\n"
-
-  printf "${BLUE}Aguardando o cadastro (até 10 min — Ctrl+C para abortar)${NC}"
-  local elapsed=0
-  until test_repo_access; do
-    sleep 5; elapsed=$((elapsed+5)); printf "."
-    if [ "$elapsed" -ge 600 ]; then
-      printf "\n"; err "Chave não cadastrada em 10 min. Rode o instalador de novo."; exit 1
-    fi
-  done
-  printf "\n"; log "Chave autorizada"
 }
 
-clone_main_repo() {
-  if [ -d "$INSTALL_DIR/.git" ]; then
-    info "Repo já clonado em $INSTALL_DIR (o bootstrap atualiza)"
-    return
-  fi
-  if [ -e "$INSTALL_DIR" ] && [ -n "$(ls -A "$INSTALL_DIR" 2>/dev/null || true)" ]; then
-    err "$INSTALL_DIR existe e não está vazio. Remova ou aponte INSTALL_DIR para outro caminho."
+ask_tokens() {
+  ask IONSMART_PROVISION_TOKEN "Token de preparação da Ion (Frota → Dispositivos → Gerar token):"
+  if [ -z "${IONSMART_PROVISION_TOKEN:-}" ]; then
+    err "Sem o token de preparação não dá para baixar a versão nem licenciar a placa."
     exit 1
   fi
-  step "Clonando ${REPO_OWNER}/${REPO_NAME} (branch $BRANCH) → $INSTALL_DIR"
-  git clone --branch "$BRANCH" "$REPO_URL_SSH" "$INSTALL_DIR"
+  ask TS_AUTHKEY "Chave do Tailscale da Ion para o suporte remoto (Enter para pular):"
 }
 
-# I.2: rede, HTTPS (certificado), watchdog, firewall e hotspot. Sem isto o
-# nginx não sobe e o painel fica inacessível.
+# Credencial de leitura do GHCR, entregue pela nuvem a cada uso e descartada
+pull_images() {
+  step "Baixando a versão $VERSION"
+  local tok resp cfg
+  tok="$(mktemp)"; resp="$(mktemp)"; cfg="$(mktemp -d)"
+  chmod 600 "$tok"; printf 'x-api-key: %s\n' "$IONSMART_PROVISION_TOKEN" > "$tok"
+  local code
+  code="$(curl -sS -o "$resp" -w '%{http_code}' -X POST -H @"$tok" "$CLOUD_URL/api/edge/registry-credentials" || echo 000)"
+  rm -f "$tok"
+  if [ "$code" != 200 ]; then
+    err "A nuvem recusou o token (HTTP $code): $(head -c 300 "$resp")"; rm -f "$resp"; exit 1
+  fi
+  python3 -I -c 'import json,sys; d=json.load(open(sys.argv[1]))["data"]; print(d["username"]); print(d["password"])' "$resp" \
+    | { read -r user; read -r pass; printf '%s' "$pass" | $SUDO env DOCKER_CONFIG="$cfg" docker login ghcr.io -u "$user" --password-stdin >/dev/null; }
+  rm -f "$resp"
+  local img ok=1
+  for img in "${IMAGES[@]}"; do $SUDO env DOCKER_CONFIG="$cfg" docker pull -q "$img" >/dev/null || ok=0; done
+  $SUDO env DOCKER_CONFIG="$cfg" docker logout ghcr.io >/dev/null 2>&1 || true
+  $SUDO rm -rf "$cfg"
+  [ "$ok" = 1 ] || { err "Falha ao baixar ${IMAGES[*]}"; exit 1; }
+  log "Imagens baixadas"
+}
+
+# Pi da instalação antiga: tira o código e a chave do GitHub, guarda o que é do Pi
+retire_git_install() {
+  [ -d "$INSTALL_DIR/.git" ] || return 0
+  step "Removendo o código-fonte e a chave do GitHub deste Pi (L.1)"
+  [ -e "$OLD_DIR" ] && { err "$OLD_DIR já existe — uma conversão anterior não terminou. Confira e apague antes."; exit 1; }
+  mv "$INSTALL_DIR" "$OLD_DIR"
+  mkdir -p "$INSTALL_DIR/infra/mosquitto"
+  cp -p "$OLD_DIR/.env" "$INSTALL_DIR/.env" 2>/dev/null || true
+  cp -p "$OLD_DIR/infra/mosquitto/passwd" "$INSTALL_DIR/infra/mosquitto/passwd" 2>/dev/null || true
+  # A deploy key e o alias SSH do GitHub
+  rm -f "$HOME/.ssh/id_ion" "$HOME/.ssh/id_ion.pub"
+  if [ -f "$HOME/.ssh/config" ]; then
+    python3 -I - "$HOME/.ssh/config" <<'PY'
+import re, sys
+p = sys.argv[1]; s = open(p).read()
+s = re.sub(r"\n?# IonCharge[^\n]*\nHost github-ion\n(?:[ \t]+[^\n]*\n?)*", "\n", s)
+open(p, "w").write(s)
+PY
+  fi
+  warn "Um admin Ion deve apagar a deploy key 'rpi-$(hostname)' em github.com/ionbr/ion-smart-charge/settings/keys"
+}
+
+extract_host_package() {
+  step "Extraindo o pacote do host da versão $VERSION"
+  mkdir -p "$INSTALL_DIR"
+  local cid
+  cid="$($SUDO docker create "${IMAGES[0]}")"
+  $SUDO docker cp "$cid:/app/host/." "$INSTALL_DIR/"
+  $SUDO docker rm "$cid" >/dev/null
+  $SUDO chown -R "$USER:" "$INSTALL_DIR"
+}
+
+# rede, HTTPS (certificado), watchdog, firewall, hotspot, serial e licença
 setup_host() {
-  local script="$INSTALL_DIR/infra/pi/setup-host.sh"
-  if [ ! -f "$script" ]; then
-    err "$script não encontrado — o branch '$BRANCH' não é o do Ion Smart Edge?"
-    exit 1
-  fi
-  if [ -z "${TS_AUTHKEY:-}" ] && [ -r /dev/tty ]; then
-    printf "\n  Chave do Tailscale da Ion para o suporte remoto (Enter para pular): " > /dev/tty
-    read -rs TS_AUTHKEY < /dev/tty || true
-    printf "\n" > /dev/tty
-  fi
-  if [ -z "${IONSMART_PROVISION_TOKEN:-}" ] && [ -r /dev/tty ]; then
-    printf "  Token de preparação da Ion (Frota → Gerar token; licencia esta placa): " > /dev/tty
-    read -rs IONSMART_PROVISION_TOKEN < /dev/tty || true
-    printf "\n" > /dev/tty
-  fi
-  export TS_AUTHKEY="${TS_AUTHKEY:-}" IONSMART_PROVISION_TOKEN="${IONSMART_PROVISION_TOKEN:-}"
+  export TS_AUTHKEY="${TS_AUTHKEY:-}" IONSMART_PROVISION_TOKEN IONSMART_CLOUD_URL="$CLOUD_URL"
   step "Preparando o sistema do Pi (setup-host.sh)"
   # --preserve-env: as chaves chegam ao script sem aparecer na lista de processos
-  if [ -n "${HOSTNAME_NEW:-}" ]; then
-    $SUDO --preserve-env=TS_AUTHKEY,IONSMART_PROVISION_TOKEN bash "$script" --hostname "$HOSTNAME_NEW"
-  else
-    $SUDO --preserve-env=TS_AUTHKEY,IONSMART_PROVISION_TOKEN bash "$script"
-  fi
-  unset TS_AUTHKEY IONSMART_PROVISION_TOKEN
+  local args=()
+  [ -n "${HOSTNAME_NEW:-}" ] && args=(--hostname "$HOSTNAME_NEW")
+  $SUDO --preserve-env=TS_AUTHKEY,IONSMART_PROVISION_TOKEN,IONSMART_CLOUD_URL bash "$INSTALL_DIR/infra/pi/setup-host.sh" "${args[@]}"
 }
 
 run_bootstrap() {
-  local bootstrap="$INSTALL_DIR/scripts/bootstrap-edge-rpi.sh"
-  if [ ! -f "$bootstrap" ]; then
-    err "Script $bootstrap não encontrado. Estrutura do repo pode ter mudado."
-    exit 1
+  # setup-host.sh pode ter movido o Docker para o NVMe: as imagens ficaram para trás
+  $SUDO docker image inspect "${IMAGES[@]}" >/dev/null 2>&1 || pull_images
+  step "Subindo a plataforma (bootstrap-edge-rpi.sh)"
+  IONSMART_IMAGE_TAG="$VERSION" INSTALL_DIR="$INSTALL_DIR" SYNC_CLOUD_URL="$CLOUD_URL" bash "$INSTALL_DIR/scripts/bootstrap-edge-rpi.sh"
+  if [ -d "$OLD_DIR" ]; then
+    rm -rf "$OLD_DIR"
+    $SUDO docker image prune -f >/dev/null 2>&1 || true  # imagens compiladas no Pi pela instalação antiga
+    log "Código antigo apagado"
   fi
-  step "Instalando a plataforma (bootstrap-edge-rpi.sh)"
-  BRANCH="$BRANCH" INSTALL_DIR="$INSTALL_DIR" SSH_KEY_PATH="$SSH_KEY_PATH" bash "$bootstrap"
 }
 
 ask_reboot() {
@@ -202,7 +188,6 @@ ask_reboot() {
   echo "  Rede, hotspot de configuração e watchdog passam a valer depois do reinício."
   echo "  Depois dele, o painel fica em https://$(hostname).local"
   echo
-  # stdin é o pipe do curl: a pergunta vai para o terminal.
   if [ -r /dev/tty ]; then
     local answer=""
     printf "  Reiniciar agora? [S/n] " > /dev/tty
@@ -228,11 +213,14 @@ main() {
   printf "${BOLD}${BLUE}Ion Smart Edge — Instalador Raspberry Pi${NC}\n"
   ensure_sudo
   detect_os
-  install_apt_prereqs
-  setup_deploy_key
-  clone_main_repo
+  install_prereqs
+  ask_tokens
+  pull_images
+  retire_git_install
+  extract_host_package
   setup_host
   run_bootstrap
+  unset IONSMART_PROVISION_TOKEN TS_AUTHKEY
   remove_old_gh_token
   ask_reboot
 }
