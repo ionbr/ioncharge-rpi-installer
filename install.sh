@@ -20,6 +20,8 @@
 #   INSTALL_DIR    destino do clone (default: $HOME/ion-smart-charge)
 #   BRANCH         branch do repo privado (default: ion-smart-edge)
 #   HOSTNAME_NEW   hostname do Pi (default: ionsmart-<4 últimos do MAC>)
+#   TS_AUTHKEY     chave de uso único do Tailscale da Ion (suporte remoto);
+#                  sem ela o instalador pergunta (Enter pula)
 #   SYNC_CLOUD_URL URL da Smart Cloud
 #   (demais: ver scripts/bootstrap-edge-rpi.sh no repo principal)
 # ============================================================
@@ -161,12 +163,20 @@ setup_host() {
     err "$script não encontrado — o branch '$BRANCH' não é o do Ion Smart Edge?"
     exit 1
   fi
-  step "Preparando o sistema do Pi (setup-host.sh)"
-  if [ -n "${HOSTNAME_NEW:-}" ]; then
-    $SUDO bash "$script" --hostname "$HOSTNAME_NEW"
-  else
-    $SUDO bash "$script"
+  if [ -z "${TS_AUTHKEY:-}" ] && [ -r /dev/tty ]; then
+    printf "\n  Chave do Tailscale da Ion para o suporte remoto (Enter para pular): " > /dev/tty
+    read -rs TS_AUTHKEY < /dev/tty || true
+    printf "\n" > /dev/tty
   fi
+  export TS_AUTHKEY="${TS_AUTHKEY:-}"
+  step "Preparando o sistema do Pi (setup-host.sh)"
+  # --preserve-env: a chave chega ao script sem aparecer na lista de processos
+  if [ -n "${HOSTNAME_NEW:-}" ]; then
+    $SUDO --preserve-env=TS_AUTHKEY bash "$script" --hostname "$HOSTNAME_NEW"
+  else
+    $SUDO --preserve-env=TS_AUTHKEY bash "$script"
+  fi
+  unset TS_AUTHKEY
 }
 
 run_bootstrap() {
