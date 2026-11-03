@@ -1,72 +1,73 @@
-# IonCharge RPi Installer
+# IonCharge RPi Installer — Ion Smart Edge
 
-Wrapper público de instalação do **IonCharge Edge** em Raspberry Pi.
+Instalador de um comando do **Ion Smart Edge** num Raspberry Pi 5.
+
+> Este branch (`ion-smart-edge`) instala o Ion Smart Edge. A `main` continua instalando a versão anterior.
 
 ## Uso
 
-No Pi (recém-instalado, com internet):
+No Pi (Raspberry Pi OS 64-bit, com internet pelo cabo), logado como o usuário do Pi (não root):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ionbr/ioncharge-rpi-installer/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/ionbr/ioncharge-rpi-installer/ion-smart-edge/install.sh | bash
 ```
 
-O script instala dependências, autentica no GitHub via device-code flow, clona o repo privado [ionbr/ion-smart-charge](https://github.com/ionbr/ion-smart-charge) e executa o `scripts/bootstrap-edge-rpi.sh` de lá — que instala Docker, gera deploy key SSH dedicada, builda a imagem edge (Postgres + Redis + backend + frontend) e sobe a stack.
+O script:
+1. instala os pacotes base;
+2. gera a **chave de leitura do Pi** e espera um admin Ion cadastrá-la no repositório;
+3. clona o [ionbr/ion-smart-charge](https://github.com/ionbr/ion-smart-charge) (branch `ion-smart-edge`);
+4. roda `infra/pi/setup-host.sh`: hostname `ionsmart-xxxx`, certificado HTTPS, watchdog, firewall, rede (DHCP + IP de serviço 192.168.250.1) e hotspot de configuração;
+5. roda `scripts/bootstrap-edge-rpi.sh`: Docker, `.env`, build das imagens e stack (Postgres, Mosquitto, backend, painel e nginx);
+6. pede para reiniciar.
 
-Tempo total: ~15–25 min na primeira vez (build das imagens ARM é o gargalo).
+Tempo: ~15–25 min na primeira vez (o build das imagens no Pi é o gargalo).
 
-## O que o técnico faz no Pi
+Nenhuma conta ou token pessoal do GitHub fica no Pi. Pis instalados pelo instalador antigo têm o login do `gh` removido.
 
-1. **Liga o Pi** e abre o terminal (com internet)
-2. **Roda o `curl | bash`** acima
-3. **Autentica no GitHub** (uma vez): copia o código de 8 caracteres mostrado, abre `https://github.com/login/device` no celular, cola o código, clica Autorizar
-4. **Cadastra a deploy key**: copia a chave `ssh-ed25519 ...` mostrada, abre `https://github.com/ionbr/ion-smart-charge/settings/keys/new`, cola, dá nome (`rpi-<hostname>`), **não marca** "Allow write access", clica Add key
-5. **Espera o build** (~15-25 min)
-6. Saída final mostra:
-   - URLs do Pi (Dashboard `:3001`, API `:3000`, OCPP `:9000`)
-   - **Próximo passo: pareamento via UI**
+## O que o técnico faz
 
-## Pareamento com a cloud (depois do boot)
+1. Liga o Pi no cabo de rede e abre o terminal.
+2. Roda o `curl | bash` acima.
+3. **Pede a um admin Ion para cadastrar a chave** mostrada na tela em `https://github.com/ionbr/ion-smart-charge/settings/keys/new` (título `rpi-<hostname>`, **sem** "Allow write access"). O script continua sozinho quando a chave é cadastrada.
+4. Espera o build e responde **S** para reiniciar.
 
-A partir do PR #102 do produto, o pareamento é feito **na UI local do Pi**, não em arquivos `.env`:
+## Depois do reinício
 
-1. Solicita ao admin Íon um **claim code** (formato `ABCD-1234`, validade 24h)
-   - Admin gera no dashboard cloud em `Fleet → [edge] → Pareamento → Gerar código`
-   - Pode ler do **QR code** se preferir
-2. No celular ou notebook na mesma rede do Pi, abre `http://<ip-do-pi>:3001/setup`
-3. Digita os 8 caracteres na tela de pareamento
-4. Pi valida com a cloud, recebe API key escopada (cifrada AES-256-GCM no DB local) e começa a sincronizar
+| O quê | Endereço |
+|---|---|
+| Painel | `https://ionsmart-xxxx.local` ou `https://<ip-do-pi>` |
+| Cabo direto (notebook em `192.168.250.2/24`) | `https://192.168.250.1` |
+| Hotspot de configuração | SSID `IonSmart-xxxx`; senha em `/etc/ionsmart/ap-password` |
+| OCPP (configurar no carregador) | `ws://<ip-do-pi>:9000/ocpp/<NOME_DO_CARREGADOR>` |
 
-Após pareado, atualizações de config (chargers, balancing, vehicles) descem da cloud automaticamente a cada 5 min. Sessões e eventos sobem em fila.
+O certificado é autoassinado: o navegador pede confirmação na primeira vez. A impressão digital aparece no fim do `setup-host.sh`.
+
+## Pareamento com a Smart Cloud
+
+1. Peça ao admin Ion um **código de pareamento** (formato `ABCD-1234`, validade de 24 h), gerado na Frota da Smart Cloud.
+2. Abra `https://ionsmart-xxxx.local/setup`.
+3. Digite o código. O Pi recebe a chave de sincronização (guardada cifrada no banco local) e começa a sincronizar.
 
 ## Variáveis (opcionais)
-
-Repassadas para o `bootstrap-edge-rpi.sh`. Ver lista completa em [bootstrap-edge-rpi.sh](https://github.com/ionbr/ion-smart-charge/blob/main/scripts/bootstrap-edge-rpi.sh).
 
 | Variável | Default | Descrição |
 |---|---|---|
 | `INSTALL_DIR` | `$HOME/ion-smart-charge` | Destino do clone |
-| `BRANCH` | `main` | Branch do repo privado |
-| `JWT_SECRET` | gerado | Segredo JWT (32+ chars) |
-| `SESSION_SECRET` | gerado | Segredo de sessão do frontend |
-| `POSTGRES_PASSWORD` | gerado | Senha do Postgres local |
-| `SYNC_CLOUD_URL` | `https://app.ioncharge.com.br` | URL da cloud central |
-| `EDGE_RETENTION_DAYS` | `30` | Dias de retenção de dados locais |
+| `BRANCH` | `ion-smart-edge` | Branch do repo privado |
+| `HOSTNAME_NEW` | `ionsmart-<MAC>` | Hostname do Pi |
+| `SYNC_CLOUD_URL` | `https://smart.ioncharge.com.br` | URL da Smart Cloud |
+| `EDGE_RETENTION_DAYS` | `30` | Dias de retenção local |
 
-Variáveis de pareamento (`EDGE_SITE_ID`, `EDGE_DEVICE_ID`, `SYNC_EDGE_API_KEY`) **não existem mais** — a config persiste cifrada em `EdgeConfig` no DB local após o pareamento via UI.
+Segredos (`JWT_SECRET`, `POSTGRES_PASSWORD`, `MOSQUITTO_PASSWORD`…) são gerados no Pi. Lista completa em `scripts/bootstrap-edge-rpi.sh`.
 
-## Atualizações futuras
+## Atualizar um Pi já instalado
 
-Após a primeira instalação, atualizações de novos PRs mergeados em `main` são feitas direto no Pi (sem rodar este installer de novo):
+Até existir a atualização OTA, rode o bootstrap de novo (ele puxa o branch, recalcula a versão e remove containers antigos):
 
 ```bash
-cd ~/ion-smart-charge
-git pull && docker compose -f docker-compose.edge.yml up -d --build
+bash ~/ion-smart-charge/scripts/bootstrap-edge-rpi.sh
 ```
-
-A deploy key SSH gerada no setup inicial faz o `git pull` funcionar sem token.
 
 ## O que este repositório contém
 
-Apenas o `install.sh` wrapper. Sem segredos, sem código do produto, sem credenciais. O instalador é público para permitir o `curl | bash` direto.
-
-O código real do IonCharge Edge fica em [ionbr/ion-smart-charge](https://github.com/ionbr/ion-smart-charge) (privado).
+Só o `install.sh` e este README. Sem segredos, sem código do produto. É público para permitir o `curl | bash`.
