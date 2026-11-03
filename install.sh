@@ -84,12 +84,22 @@ test_repo_access() {
     git ls-remote "$REPO_URL_SSH" HEAD >/dev/null 2>&1
 }
 
+# Nome do Pi como o setup-host.sh vai deixá-lo (ionsmart-<MAC>): a chave
+# é gerada antes da troca de hostname e precisa de um nome único no GitHub.
+pi_name() {
+  if [ -n "${HOSTNAME_NEW:-}" ]; then echo "$HOSTNAME_NEW"; return; fi
+  if [ "$(hostname)" != raspberrypi ]; then hostname; return; fi
+  local suffix
+  suffix="$(tr -d ':\n' < "/sys/class/net/${IONSMART_ETH:-eth0}/address" 2>/dev/null | tail -c 4)"
+  echo "ionsmart-${suffix:-0000}"
+}
+
 # Chave de leitura do Pi. O bootstrap reconhece a mesma chave e o mesmo
 # alias 'github-ion' e não pede de novo.
 setup_deploy_key() {
   step "Chave de acesso do Pi ao código (somente leitura)"
   mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh"
-  [ -f "$SSH_KEY_PATH" ] || ssh-keygen -t ed25519 -f "$SSH_KEY_PATH" -N "" -C "ioncharge-rpi-$(hostname)" -q
+  [ -f "$SSH_KEY_PATH" ] || ssh-keygen -t ed25519 -f "$SSH_KEY_PATH" -N "" -C "ioncharge-rpi-$(pi_name)" -q
   chmod 600 "$SSH_KEY_PATH"
 
   touch "$HOME/.ssh/known_hosts" && chmod 600 "$HOME/.ssh/known_hosts"
@@ -114,7 +124,7 @@ setup_deploy_key() {
   printf "${BOLD}${YELLOW}══════════════════════════════════════════════════════════${NC}\n"
   echo
   printf "  1. Abra: ${BOLD}https://github.com/${REPO_OWNER}/${REPO_NAME}/settings/keys/new${NC}\n"
-  printf "  2. Title: ${BOLD}rpi-$(hostname)${NC}\n"
+  printf "  2. Title: ${BOLD}rpi-$(pi_name)${NC}\n"
   printf "  3. Key (linha única):\n\n${GREEN}"
   cat "${SSH_KEY_PATH}.pub"
   printf "${NC}\n  4. ${BOLD}Não marque${NC} 'Allow write access' e clique em ${BOLD}Add key${NC}\n\n"
