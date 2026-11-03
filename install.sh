@@ -168,15 +168,20 @@ setup_host() {
     read -rs TS_AUTHKEY < /dev/tty || true
     printf "\n" > /dev/tty
   fi
-  export TS_AUTHKEY="${TS_AUTHKEY:-}"
-  step "Preparando o sistema do Pi (setup-host.sh)"
-  # --preserve-env: a chave chega ao script sem aparecer na lista de processos
-  if [ -n "${HOSTNAME_NEW:-}" ]; then
-    $SUDO --preserve-env=TS_AUTHKEY bash "$script" --hostname "$HOSTNAME_NEW"
-  else
-    $SUDO --preserve-env=TS_AUTHKEY bash "$script"
+  if [ -z "${IONSMART_PROVISION_TOKEN:-}" ] && [ -r /dev/tty ]; then
+    printf "  Token de preparação da Ion (Frota → Gerar token; licencia esta placa): " > /dev/tty
+    read -rs IONSMART_PROVISION_TOKEN < /dev/tty || true
+    printf "\n" > /dev/tty
   fi
-  unset TS_AUTHKEY
+  export TS_AUTHKEY="${TS_AUTHKEY:-}" IONSMART_PROVISION_TOKEN="${IONSMART_PROVISION_TOKEN:-}"
+  step "Preparando o sistema do Pi (setup-host.sh)"
+  # --preserve-env: as chaves chegam ao script sem aparecer na lista de processos
+  if [ -n "${HOSTNAME_NEW:-}" ]; then
+    $SUDO --preserve-env=TS_AUTHKEY,IONSMART_PROVISION_TOKEN bash "$script" --hostname "$HOSTNAME_NEW"
+  else
+    $SUDO --preserve-env=TS_AUTHKEY,IONSMART_PROVISION_TOKEN bash "$script"
+  fi
+  unset TS_AUTHKEY IONSMART_PROVISION_TOKEN
 }
 
 run_bootstrap() {
