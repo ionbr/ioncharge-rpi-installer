@@ -69,11 +69,13 @@ detect_os() {
     err "Não consegui detectar o SO (/etc/os-release ausente)."
     exit 1
   fi
+  # Em subshell: o os-release define VERSION ("13 (trixie)"), que sobrescreveria a versão do Ion Smart Edge
+  local os
   # shellcheck disable=SC1091
-  . /etc/os-release
-  case "${ID:-}${ID_LIKE:-}" in
+  os="$(. /etc/os-release; printf '%s %s' "${ID:-?}" "${ID_LIKE:-}")"
+  case "$os" in
     *debian*|*ubuntu*|*raspbian*) ;;
-    *) warn "SO '${ID:-?}' não é Debian/Raspberry Pi OS — pode falhar." ;;
+    *) warn "SO '${os%% *}' não é Debian/Raspberry Pi OS — pode falhar." ;;
   esac
 }
 
@@ -95,7 +97,7 @@ ask() { # ask VAR "pergunta" — lê do terminal sem eco (stdin é o pipe do cur
 }
 
 ask_tokens() {
-  ask IONSMART_PROVISION_TOKEN "Token de preparação da Ion (Frota → Dispositivos → Gerar token):"
+  ask IONSMART_PROVISION_TOKEN "Token de preparação da Ion (Smart Cloud → Administração → Preparação de Pi):"
   if [ -z "${IONSMART_PROVISION_TOKEN:-}" ]; then
     err "Sem o token de preparação não dá para baixar a versão nem licenciar a placa."
     exit 1
