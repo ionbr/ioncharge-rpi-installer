@@ -20,18 +20,21 @@
 # apagados; .env, senha do Mosquitto e o banco (volume Docker) ficam.
 #
 # Variáveis (todas opcionais):
-#   IONSMART_VERSION           tag das imagens (default: ion-smart-edge; versão: 1.0.0-rc.1)
+#   IONSMART_VERSION           tag das imagens (default: a do .env do Pi já instalado, senão ion-smart-edge)
 #   IONSMART_PROVISION_TOKEN   token de preparação (sem ele o instalador pergunta)
 #   TS_AUTHKEY                 chave do Tailscale da Ion (sem ela pergunta; Enter pula)
 #   INSTALL_DIR                default: $HOME/ion-smart-charge (o nome define o volume do banco — não troque num Pi já instalado)
 #   HOSTNAME_NEW               hostname do Pi (default: ionsmart-<4 últimos do MAC>)
 #   SYNC_CLOUD_URL             URL da Smart Cloud (default: https://smart.ioncharge.com.br)
+#   IONSMART_AUTO_REBOOT       1 = reinicia no fim sem perguntar (preparação automática, ion-prep.sh)
 # ============================================================
 set -euo pipefail
 
-VERSION="${IONSMART_VERSION:-ion-smart-edge}"
-CLOUD_URL="${SYNC_CLOUD_URL:-https://smart.ioncharge.com.br}"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/ion-smart-charge}"
+# I.21: reinstalar mantém a versão em que o Pi está (ex.: depois de um OTA), em vez da tag do branch
+VERSION="${IONSMART_VERSION:-$(sed -n 's/^IONSMART_IMAGE_TAG=//p' "$INSTALL_DIR/.env" 2>/dev/null | tail -1)}"
+VERSION="${VERSION:-ion-smart-edge}"
+CLOUD_URL="${SYNC_CLOUD_URL:-https://smart.ioncharge.com.br}"
 OLD_DIR="${INSTALL_DIR}.antigo-git"
 PREFIX="ghcr.io/ionbr/ion-smart-charge"
 IMAGES=("$PREFIX/backend:$VERSION" "$PREFIX/frontend-edge:$VERSION")
@@ -88,8 +91,11 @@ install_prereqs() {
   # o grupo docker fica com o bootstrap: ele sabe usar sudo enquanto o grupo não vale
 }
 
+# Serviço sem terminal (preparação automática): /dev/tty existe, mas não abre
+has_tty() { (: > /dev/tty) 2>/dev/null; }
+
 ask() { # ask VAR "pergunta" — lê do terminal sem eco (stdin é o pipe do curl)
-  if [ -z "${!1:-}" ] && [ -r /dev/tty ]; then
+  if [ -z "${!1:-}" ] && has_tty; then
     printf "\n  %s " "$2" > /dev/tty
     read -rs "$1" < /dev/tty || true
     printf "\n" > /dev/tty
@@ -201,7 +207,9 @@ ask_reboot() {
   echo "  Rede, hotspot de configuração e watchdog passam a valer depois do reinício."
   echo "  Depois dele, o painel fica em https://$(hostname).local"
   echo
-  if [ -r /dev/tty ]; then
+  if [ "${IONSMART_AUTO_REBOOT:-0}" = 1 ]; then
+    log "Reiniciando (preparação automática)…"; $SUDO reboot
+  elif has_tty; then
     local answer=""
     printf "  Reiniciar agora? [S/n] " > /dev/tty
     read -r answer < /dev/tty || true

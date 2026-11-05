@@ -41,28 +41,50 @@ O Pi **não recebe código-fonte nem chave do GitHub**. Um Pi instalado pelo ins
 
 O certificado é autoassinado: o navegador pede confirmação na primeira vez. A impressão digital aparece no fim do `setup-host.sh`.
 
-## Pareamento com a Smart Cloud
+## Atribuir o Pi a um quadro
 
-1. Peça ao admin Ion um **código de pareamento** (formato `ABCD-1234`, validade de 24 h), gerado na Frota da Smart Cloud.
-2. Abra `https://ionsmart-xxxx.local/setup`.
-3. Digite o código. O Pi recebe a chave de sincronização (guardada cifrada no banco local) e começa a sincronizar.
+Depois do reinício o Pi aparece em **Smart Cloud → Controladores → Preparados**. O admin liga o serial da etiqueta ao quadro em **Sites → site → Adicionar quadro** e, em até 30 s, o Pi começa a sincronizar. Ninguém digita código no Pi.
+
+Pi preparado por instalador antigo (sem chave de atribuição): pareamento por código na aba Controlador do quadro, digitado em `https://ionsmart-xxxx.local/setup`, ou rode o instalador de novo com um token.
+
+## Preparação automática, sem SSH (vários Pis)
+
+Para Super Admin preparar vários Pis de uma vez:
+
+1. Grave o cartão no Raspberry Pi Imager (Raspberry Pi OS Lite 64-bit) com a customização de **usuário e SSH**; hostname e Wi-Fi em branco.
+2. Com o cartão ainda no computador:
+   ```bash
+   bash ion-prep.sh
+   ```
+   Ele pede o token de preparação (Controladores → Preparar Pi → Copiar), a URL da nuvem e a chave do Tailscale (opcional), e grava tudo na partição de boot.
+3. Ejete, coloque no Pi, ligue o cabo de rede e a fonte. No primeiro boot o Pi roda o instalador sozinho, reinicia e aparece em **Controladores → Preparados** (~20 min).
+
+Para vários cartões seguidos, exporte as variáveis uma vez e rode `bash ion-prep.sh` a cada cartão:
+```bash
+export IONSMART_PROVISION_TOKEN=… SYNC_CLOUD_URL=https://smart.ioncharge.com.br TS_AUTHKEY=…
+```
+Para lotes, a chave do Tailscale precisa ser **reutilizável** (com `tag:edge-pi`, validade curta).
+
+O token fica em texto no cartão até o primeiro boot, quando o Pi o apaga. Use tokens de 24 h e não deixe cartões preparados largados. Log no Pi: `/var/log/ionsmart-firstboot.log`. Se falhar (sem rede, por exemplo), o Pi tenta de novo nos próximos boots, até 3 vezes.
 
 ## Variáveis (opcionais)
 
 | Variável | Default | Descrição |
 |---|---|---|
-| `IONSMART_VERSION` | `ion-smart-edge` | Versão das imagens (`1.0.0-rc.1`, …) |
+| `IONSMART_VERSION` | a do `.env` (Pi já instalado) ou `ion-smart-edge` | Versão das imagens (`1.0.0-rc.1`, …) |
 | `IONSMART_PROVISION_TOKEN` | (pergunta) | Token de preparação |
 | `INSTALL_DIR` | `$HOME/ion-smart-charge` | Pasta da instalação (não troque num Pi já instalado: o nome define o volume do banco) |
 | `HOSTNAME_NEW` | `ionsmart-<MAC>` | Hostname do Pi |
 | `SYNC_CLOUD_URL` | `https://smart.ioncharge.com.br` | URL da Smart Cloud |
+| `TS_AUTHKEY` | (pergunta) | Chave do Tailscale da Ion |
+| `IONSMART_AUTO_REBOOT` | `0` | `1` reinicia no fim sem perguntar |
 | `EDGE_RETENTION_DAYS` | `30` | Dias de retenção local |
 
 Segredos (`JWT_SECRET`, `POSTGRES_PASSWORD`, `MOSQUITTO_PASSWORD`…) são gerados no Pi. Lista completa em `scripts/bootstrap-edge-rpi.sh`.
 
 ## Atualizar um Pi já instalado
 
-Até existir a atualização OTA (V.7), rode o instalador de novo com a versão desejada (pede um token de preparação):
+Pela Smart Cloud: **Atualizações** → campanha com a versão (OTA; o Pi volta sozinho se a nova não subir). Ou rode o instalador de novo com a versão desejada (pede um token de preparação). Sem `IONSMART_VERSION`, ele mantém a versão em que o Pi está:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ionbr/ioncharge-rpi-installer/ion-smart-edge/install.sh | IONSMART_VERSION=1.0.0-rc.1 bash
@@ -70,4 +92,4 @@ curl -fsSL https://raw.githubusercontent.com/ionbr/ioncharge-rpi-installer/ion-s
 
 ## O que este repositório contém
 
-Só o `install.sh` e este README. Sem segredos, sem código do produto. É público para permitir o `curl | bash`.
+`install.sh`, `ion-prep.sh` (prepara o cartão), `firstboot/` (script de primeiro boot e a checagem do `ion-prep`) e este README. Sem segredos, sem código do produto. É público para permitir o `curl | bash`.
