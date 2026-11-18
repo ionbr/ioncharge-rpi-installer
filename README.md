@@ -71,9 +71,9 @@ O token fica em texto no cartão até o primeiro boot, quando o Pi o apaga. Use 
 
 | Variável | Default | Descrição |
 |---|---|---|
-| `IONSMART_VERSION` | a do `.env` (Pi já instalado) ou `ion-smart-edge` | Versão das imagens (`1.0.0-rc.1`, …) |
+| `IONSMART_VERSION` | a do `.env` (Pi já instalado) ou `latest` (release da `main`; `dev` na Development) | Versão das imagens (`1.0.0-rc.1`, …) |
 | `IONSMART_PROVISION_TOKEN` | (pergunta) | Token de preparação |
-| `INSTALL_DIR` | `$HOME/ion-smart-charge` | Pasta da instalação (não troque num Pi já instalado: o nome define o volume do banco) |
+| `INSTALL_DIR` | `$HOME/ion-smart-edge` | Pasta da instalação (não troque num Pi já instalado: o nome define o volume do banco) |
 | `HOSTNAME_NEW` | `ionsmart-<MAC>` | Hostname do Pi |
 | `SYNC_CLOUD_URL` | `https://smart.ioncharge.com.br` | URL da Smart Cloud |
 | `TS_AUTHKEY` | (pergunta) | Chave do Tailscale da Ion |

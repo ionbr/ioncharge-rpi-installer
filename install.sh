@@ -20,23 +20,23 @@
 # apagados; .env, senha do Mosquitto e o banco (volume Docker) ficam.
 #
 # Variáveis (todas opcionais):
-#   IONSMART_VERSION           tag das imagens (default: a do .env do Pi já instalado, senão ion-smart-edge)
+#   IONSMART_VERSION           tag das imagens (default: a do .env do Pi já instalado, senão latest)
 #   IONSMART_PROVISION_TOKEN   token de preparação (sem ele o instalador pergunta)
 #   TS_AUTHKEY                 chave do Tailscale da Ion (sem ela pergunta; Enter pula)
-#   INSTALL_DIR                default: $HOME/ion-smart-charge (o nome define o volume do banco — não troque num Pi já instalado)
+#   INSTALL_DIR                default: $HOME/ion-smart-edge (o nome define o volume do banco)
 #   HOSTNAME_NEW               hostname do Pi (default: ionsmart-<4 últimos do MAC>)
 #   SYNC_CLOUD_URL             URL da Smart Cloud (default: https://smart.ioncharge.com.br)
 #   IONSMART_AUTO_REBOOT       1 = reinicia no fim sem perguntar (preparação automática, ion-prep.sh)
 # ============================================================
 set -euo pipefail
 
-INSTALL_DIR="${INSTALL_DIR:-$HOME/ion-smart-charge}"
+INSTALL_DIR="${INSTALL_DIR:-$HOME/ion-smart-edge}"
 # I.21: reinstalar mantém a versão em que o Pi está (ex.: depois de um OTA), em vez da tag do branch
 VERSION="${IONSMART_VERSION:-$(sed -n 's/^IONSMART_IMAGE_TAG=//p' "$INSTALL_DIR/.env" 2>/dev/null | tail -1)}"
-VERSION="${VERSION:-ion-smart-edge}"
+VERSION="${VERSION:-latest}"
 CLOUD_URL="${SYNC_CLOUD_URL:-https://smart.ioncharge.com.br}"
 OLD_DIR="${INSTALL_DIR}.antigo-git"
-PREFIX="ghcr.io/ionbr/ion-smart-charge"
+PREFIX="ghcr.io/ionbr/ion-smart-edge"
 IMAGES=("$PREFIX/backend:$VERSION" "$PREFIX/frontend-edge:$VERSION")
 
 # ---------- cores / logging ----------
