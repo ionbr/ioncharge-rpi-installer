@@ -24,7 +24,7 @@
 #   IONSMART_PROVISION_TOKEN   token de preparação (sem ele o instalador pergunta)
 #   TS_AUTHKEY                 chave do Tailscale da Ion (sem ela pergunta; Enter pula)
 #   INSTALL_DIR                default: $HOME/ion-smart-edge (o nome define o volume do banco)
-#   HOSTNAME_NEW               hostname do Pi (default: ionsmart-<4 últimos do MAC>)
+#   HOSTNAME_NEW               hostname do Pi (default: ionsmart-<5 últimos do serial>)
 #   SYNC_CLOUD_URL             URL da Smart Cloud (default: https://smart.ioncharge.com.br)
 #   IONSMART_AUTO_REBOOT       1 = reinicia no fim sem perguntar (preparação automática, ion-prep.sh)
 # ============================================================

@@ -41,9 +41,9 @@ O Pi **não recebe código-fonte nem chave do GitHub**. Um Pi instalado pelo ins
 
 O certificado é autoassinado: o navegador pede confirmação na primeira vez. A impressão digital aparece no fim do `setup-host.sh`.
 
-## Atribuir o Pi a um quadro
+## Parear o Pi com a Smart Cloud
 
-Depois do reinício o Pi aparece em **Smart Cloud → Controladores → Preparados**. O admin liga o serial da etiqueta ao quadro em **Sites → site → Adicionar quadro** e, em até 30 s, o Pi começa a sincronizar. Ninguém digita código no Pi.
+Depois do reinício, na Smart Cloud use **Frota → Parear equipamento** para gerar o código (válido por 24 h) e digite-o em `https://<pi>/setup`. O Pi aparece Online na Frota e começa a sincronizar.
 
 Pi preparado por instalador antigo (sem chave de atribuição): pareamento por código na aba Controlador do quadro, digitado em `https://ionsmart-xxxx.local/setup`, ou rode o instalador de novo com um token.
 
@@ -74,7 +74,7 @@ O token fica em texto no cartão até o primeiro boot, quando o Pi o apaga. Use 
 | `IONSMART_VERSION` | a do `.env` (Pi já instalado) ou `latest` (release da `main`; `dev` na Development) | Versão das imagens (`1.0.0-rc.1`, …) |
 | `IONSMART_PROVISION_TOKEN` | (pergunta) | Token de preparação |
 | `INSTALL_DIR` | `$HOME/ion-smart-edge` | Pasta da instalação (não troque num Pi já instalado: o nome define o volume do banco) |
-| `HOSTNAME_NEW` | `ionsmart-<MAC>` | Hostname do Pi |
+| `HOSTNAME_NEW` | `ionsmart-<5 últimos do serial>` | Hostname do Pi |
 | `SYNC_CLOUD_URL` | `https://smart.ioncharge.com.br` | URL da Smart Cloud |
 | `TS_AUTHKEY` | (pergunta) | Chave do Tailscale da Ion |
 | `IONSMART_AUTO_REBOOT` | `0` | `1` reinicia no fim sem perguntar |
